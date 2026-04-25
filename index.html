@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>JPL Order Maker</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            touch-action: manipulation;
+        }
+
+        .no-select {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        [v-cloak] {
+            display: none;
+        }
+
+        @media (orientation: landscape) and (max-height: 500px) {
+            .landscape-row {
+                flex-direction: row !important;
+            }
+
+            .landscape-w-2-3 {
+                width: 66.666667% !important;
+            }
+
+            .landscape-w-1-3 {
+                width: 33.333333% !important;
+                height: 100% !important;
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800 h-[100dvh] overflow-hidden flex flex-col">
+
+    <div id="app" v-cloak class="flex flex-col h-full relative">
+
+        <header class="bg-blue-600 text-white p-3 shadow-md flex justify-between items-center z-20 shrink-0 relative">
+            <div class="flex items-center gap-2">
+                <h1 class="text-lg font-bold">JPL オーダー表</h1>
+                <select v-model.number="activeTeamId" @change="switchTeam(activeTeamId)"
+                    class="text-xs bg-white text-gray-800 rounded px-2 py-1 border border-blue-300 focus:outline-none">
+                    <option v-for="team in teams" :key="team.id" :value="team.id">
+                        {{ team.name }}
+                    </option>
+                </select>
+            </div>
+            <div class="flex gap-2">
+                <button @click="openExportModal"
+                    class="text-xs bg-blue-500 px-3 py-1 rounded hover:bg-blue-400 transition ml-2 border border-blue-400">テキスト出力</button>
+                <button @click="resetData"
+                    class="text-xs bg-blue-800 px-3 py-1 rounded hover:bg-blue-700 transition">全クリア</button>
+            </div>
+        </header>
+
+        <div class="flex-1 flex flex-col md:flex-row landscape-row overflow-hidden relative z-0">
+
+            <div class="bg-gray-100 overflow-y-auto p-2 pb-24 md:pb-4 landscape-w-2-3 flex-1 scroll-smooth min-h-0">
+                <div v-for="game in games" :key="game.no"
+                    class="bg-white rounded-lg shadow-sm mb-3 p-2 border border-gray-200">
+                    <div class="flex items-center justify-between mb-2 border-b pb-1">
+                        <div class="flex items-center">
+                            <span class="text-blue-600 font-black text-lg mr-2 w-8">G{{ game.no }}</span>
+                            <div class="flex flex-col leading-tight">
+                                <span class="font-bold text-sm">{{ game.name === 'CR' ? 'STANDERD CRICKET' : game.name }}</span>
+                                <span class="text-[10px] text-gray-400">{{ game.format }}</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col items-end">
+                            <span class="text-[10px] text-gray-400">Total Rt</span>
+                            <span class="font-bold text-base text-gray-700">{{ getGameTotalRating(game.no) }}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-1">
+                        <div v-for="i in game.count" :key="i" @click="assignMember(game.no, i - 1)"
+                            :class="['w-16 h-12 md:w-20 md:h-14 rounded border flex flex-col justify-center items-center text-xs text-center cursor-pointer transition-all no-select overflow-hidden relative',
+                                     getAssignedMemberObj(game.no, i - 1) ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-gray-50 border-gray-300 text-gray-400 border-dashed']">
+                            <span class="font-bold w-full px-1 truncate text-[10px] md:text-xs z-10">
+                                {{ getAssignedMemberObj(game.no, i - 1)?.name || '空き' }}
+                            </span>
+
+                            <span v-if="getAssignedMemberObj(game.no, i - 1)"
+                                class="text-[9px] text-blue-400 scale-90 z-10">
+                                (Rt: {{ getAssignedMemberObj(game.no, i - 1).rating }})
+                            </span>
+
+                            <div v-if="getAssignedMemberObj(game.no, i - 1)"
+                                class="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center bg-yellow-400 text-yellow-900 text-[10px] font-bold shadow-sm z-20 border border-white">
+                                {{ getPlayCountUpTo(getAssignedMemberObj(game.no, i - 1).id, game.no) }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="h-32 md:h-10"></div>
+            </div>
+
+            <div class="bg-white border-t md:border-t-0 md:border-l border-gray-300 flex flex-col shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-10 
+                        md:static md:h-full md:w-1/3 landscape-w-1-3 h-auto max-h-[40%] shrink-0">
+
+                <div class="p-2 bg-gray-50 border-b flex justify-between items-center shrink-0">
+                    <h2 class="font-bold text-sm text-gray-600">メンバー選択</h2>
+                    <button @click="openMenu"
+                        class="text-xs bg-gray-200 border border-gray-300 px-2 py-1 rounded flex items-center gap-1 active:bg-gray-300">
+                        <span>⚙ 管理・編集</span>
+                    </button>
+                </div>
+
+                <div class="overflow-y-auto p-2 flex-1">
+                    <div class="flex flex-wrap gap-2 content-start">
+                        <div v-for="member in members" :key="member.id" @click="selectMember(member)"
+                            :class="['w-20 h-14 rounded border flex flex-col justify-center items-center cursor-pointer transition-all shadow-sm relative', 
+                                     selectedMember?.id === member.id ? 'bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 transform scale-105' : 'bg-white border-gray-200 text-gray-800']">
+                            <span
+                                class="font-bold text-[11px] md:text-xs truncate w-full px-1 text-center leading-tight">
+                                {{ member.name }}
+                            </span>
+                            <span
+                                :class="['text-[9px] scale-90', selectedMember?.id === member.id ? 'text-blue-200' : 'text-gray-400']">
+                                Rt:{{ member.rating }}
+                            </span>
+                            <div v-if="getPlayCount(member.id) > 0"
+                                :class="['absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold border',
+                                          selectedMember?.id === member.id ? 'bg-white text-blue-600 border-blue-600' : 'bg-green-500 text-white border-white']">
+                                {{ getPlayCount(member.id) }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div v-if="showMemberMenu"
+            class="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4">
+            <div class="bg-white w-full max-w-md h-auto max-h-[90%] rounded-lg shadow-2xl flex flex-col overflow-hidden"
+                @click.stop>
+                <div class="bg-gray-100 p-3 border-b flex justify-between items-center shrink-0">
+                    <h3 class="font-bold text-gray-800">メンバー管理</h3>
+                    <button @click="closeMenu"
+                        class="text-blue-600 font-bold px-3 py-1 bg-white border rounded shadow-sm">完了</button>
+                </div>
+
+                <div class="p-4 overflow-y-auto flex-1 space-y-4">
+                    <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-100">
+                        <div class="text-xs font-bold text-yellow-800 mb-2">チーム管理</div>
+                        <div class="flex gap-2 mb-2">
+                            <input v-model="newTeamName" type="text" placeholder="チーム名"
+                                class="flex-1 p-2 border rounded text-sm text-gray-900 focus:ring-2 focus:ring-blue-400 outline-none">
+                            <button @click="addTeam"
+                                class="px-3 py-2 rounded text-sm font-bold bg-yellow-500 text-white hover:bg-yellow-600 transition-colors">
+                                ＋追加
+                            </button>
+                        </div>
+                        <div class="space-y-2 max-h-40 overflow-y-auto">
+                            <div v-for="team in teams" :key="team.id"
+                                class="flex items-center gap-2 p-2 border rounded bg-white shadow-sm">
+                                <button @click="switchTeam(team.id)"
+                                    :class="['px-2 py-1 rounded text-xs font-bold border',
+                                             activeTeamId === team.id ? 'bg-blue-600 text-white border-blue-700' : 'bg-gray-100 text-gray-700 border-gray-300']">
+                                    {{ activeTeamId === team.id ? '選択中' : '切替' }}
+                                </button>
+                                <span class="flex-1 text-sm text-gray-800 truncate">{{ team.name }}</span>
+                                <button @click="deleteTeam(team.id)"
+                                    class="bg-red-50 text-red-500 p-2 rounded hover:bg-red-100 active:bg-red-200 transition-colors"
+                                    title="チーム削除">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="border-t border-gray-200"></div>
+
+                    <div class="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                        <div class="text-xs font-bold text-blue-800 mb-2">新規メンバー追加</div>
+                        <div class="flex gap-2">
+                            <input v-model="newMemberName" type="text" placeholder="名前"
+                                class="flex-1 p-2 border rounded text-sm text-gray-900 focus:ring-2 focus:ring-blue-400 outline-none">
+                            <input v-model.number="newMemberRating" type="number" placeholder="Rt"
+                                class="w-14 p-2 border rounded text-center text-sm text-gray-900 focus:ring-2 focus:ring-blue-400 outline-none">
+                        </div>
+                        <button @click="addMember" :disabled="!newMemberName"
+                            :class="['w-full mt-2 py-2 rounded text-sm font-bold shadow transition-colors', 
+                                     newMemberName ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed']">
+                            ＋ 追加する
+                        </button>
+                    </div>
+
+                    <div class="border-t border-gray-200"></div>
+
+                    <div class="space-y-2">
+                        <div v-for="member in members" :key="member.id"
+                            class="flex items-center gap-2 p-2 border rounded bg-white shadow-sm">
+                            <input v-model="member.name" type="text"
+                                class="flex-1 p-1 border-b border-transparent focus:border-blue-500 outline-none text-sm font-bold text-gray-800 transition-colors">
+
+                            <div class="flex items-center bg-gray-100 rounded px-1 border">
+                                <span class="text-xs text-gray-500 mr-1">Rt</span>
+                                <input type="number" v-model.number="member.rating"
+                                    class="w-10 bg-transparent text-center p-1 text-sm font-bold outline-none text-gray-800">
+                            </div>
+
+                            <button @click="deleteMember(member.id)"
+                                class="bg-red-50 text-red-500 p-2 rounded hover:bg-red-100 active:bg-red-200 transition-colors"
+                                title="削除">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="showExportModal"
+            class="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4">
+            <div class="bg-white w-full max-w-lg rounded-lg shadow-2xl flex flex-col max-h-[90%]" @click.stop>
+                <div class="bg-gray-100 p-3 border-b flex justify-between items-center shrink-0 rounded-t-lg">
+                    <h3 class="font-bold text-gray-800">テキスト出力</h3>
+                    <button @click="closeExportModal"
+                        class="text-gray-500 hover:text-gray-700 font-bold px-2">✕</button>
+                </div>
+                <div class="p-4 flex-1 overflow-hidden flex flex-col">
+                    <textarea readonly
+                        class="w-full h-64 p-2 border rounded bg-gray-50 text-xs font-mono resize-none focus:outline-none mb-3 flex-1"
+                        v-model="exportText"></textarea>
+                    <div class="flex justify-end gap-2 shrink-0">
+                        <button @click="closeExportModal"
+                            class="px-4 py-2 border rounded text-gray-600 hover:bg-gray-100 transition">閉じる</button>
+                        <button @click="copyToClipboard"
+                            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow">クリップボードにコピー</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="./app.js?v=0.0.12"></script>
+</body>
+
+</html>
