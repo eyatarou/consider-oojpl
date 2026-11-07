@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.pnpm-store/
+tmp/
+*.tsbuildinfo
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+.idea/
+*.iml
