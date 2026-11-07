@@ -100,6 +100,17 @@ export function emptyGame(template: GameTemplate): GameRecord {
   return { gameNo: template.no, result: 'UNKNOWN', entries: [] }
 }
 
+export function gamesFromOrder(order: OrderPlan): GameRecord[] {
+  return GAME_TEMPLATES.map((template) => {
+    const slot = order.slots.find((item) => item.gameNo === template.no)
+    return {
+      gameNo: template.no,
+      result: 'UNKNOWN',
+      entries: (slot?.playerIds ?? []).slice(0, template.count).map((playerId) => ({ playerId, stat: null })),
+    }
+  })
+}
+
 export function formatRule(game: GameTemplate): string {
   if (game.variant === 'DIDO_FREEZE') return `${game.name} ${game.format}・DIDO/フリーズ`
   return `${game.name} ${game.format}`

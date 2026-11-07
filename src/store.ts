@@ -26,6 +26,7 @@ export const useAppStore = defineStore('app', () => {
     if (index >= 0) data.value.orders[index] = order
     else data.value.orders.push(order)
   }
+  const removeOrder = (id: string) => { data.value.orders = data.value.orders.filter((order) => order.id !== id) }
   const importBackup = (value: unknown) => {
     if (!validateBackup(value)) throw new Error('対応していないバックアップ形式です。')
     data.value = cloneData(value)
@@ -33,5 +34,5 @@ export const useAppStore = defineStore('app', () => {
   const exportBackup = () => JSON.stringify(data.value, null, 2)
   const updatePlayer = (player: Player) => Object.assign(activeTeam.value.players.find((p) => p.id === player.id)!, player)
 
-  return { data, ready, activeTeam, teamMatches, teamOrders, addPlayer, removePlayer, updatePlayer, addTeam, addMatch, updateMatch, removeMatch, saveOrder, importBackup, exportBackup }
+  return { data, ready, activeTeam, teamMatches, teamOrders, addPlayer, removePlayer, updatePlayer, addTeam, addMatch, updateMatch, removeMatch, saveOrder, removeOrder, importBackup, exportBackup }
 })

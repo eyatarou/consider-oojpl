@@ -19,6 +19,16 @@ const order = computed(() => proposals.value[activeProposal.value] ?? null)
 const players = computed(() => store.activeTeam.players.filter(p => p.active))
 const name = (id: string) => players.value.find(p => p.id === id)?.name ?? '不明'
 const count = (id: string) => order.value?.slots.reduce((n, slot) => n + Number(slot.playerIds.includes(id)), 0) ?? 0
+const overLimit = (id: string) => count(id) > (maxes[id] ?? 7)
+const duplicated = (ids: string[], id: string) => ids.filter((item) => item === id).length > 1
+const orderWarnings = computed(() => {
+  if (!order.value) return []
+  const warnings = players.value.filter((player) => overLimit(player.id)).map((player) => `${player.name}：出場${count(player.id)}回 / 上限${maxes[player.id] ?? 7}回`)
+  for (const slot of order.value.slots) {
+    if (new Set(slot.playerIds).size !== slot.playerIds.length) warnings.push(`G${slot.gameNo}：同じ選手が重複しています。`)
+  }
+  return warnings
+})
 
 async function generate() {
   error.value = ''; working.value = true
@@ -43,8 +53,6 @@ function replacePlayer(plan: OrderPlan, gameNo: number, index: number, event: Ev
   const select = event.target as HTMLSelectElement
   const next = select.value
   const slot = plan.slots.find(s => s.gameNo === gameNo)!
-  const previous = slot.playerIds[index]!
-  if (slot.playerIds.includes(next) || count(next) >= (maxes[next] ?? 7)) { select.value = previous; alert('同一ゲームの重複または出場上限のため変更できません。'); return }
   slot.playerIds[index] = next
 }
 
@@ -53,6 +61,11 @@ function confirmOrder() {
   order.value.confirmed = true; store.saveOrder(cloneData(order.value)); alert('オーダーを保存しました。')
 }
 function openSaved(saved: OrderPlan) { proposals.value = [cloneData(saved)]; activeProposal.value = 0 }
+function removeSaved(id: string) {
+  if (!confirm('この保存済みオーダーを削除しますか？')) return
+  store.removeOrder(id)
+  if (order.value?.id === id) proposals.value = []
+}
 </script>
 
 <template>
@@ -73,10 +86,13 @@ function openSaved(saved: OrderPlan) { proposals.value = [cloneData(saved)]; act
     </div>
     <template v-if="store.teamOrders.length">
       <div class="section-title"><h2>保存済みオーダー</h2><span>{{ store.teamOrders.length }}件</span></div>
-      <article v-for="saved in store.teamOrders.slice(0, 5)" :key="saved.id" class="match-row" @click="openSaved(saved)">
-        <time>{{ saved.plannedOn?.slice(5).replace('-', '/') || '日付なし' }}</time>
-        <div><strong>vs {{ saved.opponent || '対戦相手未設定' }}</strong><small>信頼度 {{ saved.confidence }}</small></div>
-        <span class="result win">表示</span>
+      <article v-for="saved in store.teamOrders" :key="saved.id" class="history-card">
+        <header><div><time>{{ saved.plannedOn || '日付なし' }}</time><h2>vs {{ saved.opponent || '対戦相手未設定' }}</h2></div><span class="result win">信頼度 {{ saved.confidence }}</span></header>
+        <div class="action-grid">
+          <button class="button secondary" @click="openSaved(saved)">表示</button>
+          <router-link class="button secondary" :to="{ path: '/matches/new', query: { orderId: saved.id } }">結果入力</router-link>
+          <button class="button secondary danger-text" @click="removeSaved(saved.id)">削除</button>
+        </div>
       </article>
     </template>
     </template>
@@ -84,12 +100,21 @@ function openSaved(saved: OrderPlan) { proposals.value = [cloneData(saved)]; act
     <template v-else>
       <div class="proposal-head"><div><span class="pill">提案 {{ activeProposal + 1 }}</span><h2>推奨オーダー</h2><small>信頼度 {{ order.confidence }}・評価 {{ order.score.toFixed(2) }}</small></div><button class="text-button" @click="proposals = []">条件を変更</button></div>
       <div v-if="proposals.length > 1" class="proposal-tabs"><button v-for="(_, i) in proposals" :key="i" :class="{ active: activeProposal === i }" @click="activeProposal = i">候補{{ i + 1 }}</button></div>
+      <div v-if="orderWarnings.length" class="error" role="status" aria-live="polite"><strong>オーダーを確認してください（入れ替えは続けられます）</strong><ul><li v-for="warning in orderWarnings" :key="warning">{{ warning }}</li></ul></div>
       <article v-for="slot in order.slots" :key="slot.gameNo" class="order-game">
         <header><b>G{{ slot.gameNo }}</b><div><strong>{{ formatRule(GAME_TEMPLATES[slot.gameNo - 1]!) }}</strong><small>{{ slot.reasons[0] }}</small></div><span>{{ Math.round(slot.score * 100) }}</span></header>
-        <div class="order-players"><select v-for="(id, i) in slot.playerIds" :key="i" :value="id" @change="replacePlayer(order, slot.gameNo, i, $event)"><option v-for="player in players.filter(p => participants[p.id])" :key="player.id" :value="player.id">{{ player.name }}</option></select></div>
+        <div class="order-players"><select v-for="(id, i) in slot.playerIds" :key="i" :value="id" :class="{ 'invalid-player': overLimit(id) || duplicated(slot.playerIds, id) }" :aria-invalid="overLimit(id) || duplicated(slot.playerIds, id)" :aria-label="`G${slot.gameNo} 選手${i + 1}`" @change="replacePlayer(order, slot.gameNo, i, $event)"><option v-for="player in players.filter(p => participants[p.id])" :key="player.id" :value="player.id">{{ player.name }}</option></select></div>
+        <p v-if="new Set(slot.playerIds).size !== slot.playerIds.length" class="order-warning">同じ選手が重複しています。</p>
+        <p v-if="slot.playerIds.some(overLimit)" class="order-warning">赤枠の選手は出場上限を超えています。</p>
       </article>
-      <div class="appearance-summary"><span v-for="player in players.filter(p => participants[p.id])" :key="player.id">{{ name(player.id) }} <b>{{ count(player.id) }}</b></span></div>
-      <div class="action-grid"><button class="button primary" @click="confirmOrder">保存</button><button class="button secondary" @click="shareText(order, players)">テキスト共有</button><button class="button secondary" @click="shareImage(order, players)">画像共有</button></div>
+      <div class="appearance-summary"><span v-for="player in players.filter(p => participants[p.id])" :key="player.id" :class="{ 'invalid-player': overLimit(player.id) }">{{ name(player.id) }} <b>{{ count(player.id) }} / {{ maxes[player.id] ?? 7 }}回</b></span></div>
+      <div class="action-grid"><button class="button primary" @click="confirmOrder">保存</button><router-link v-if="order.confirmed" class="button secondary" :to="{ path: '/matches/new', query: { orderId: order.id } }">結果入力</router-link><button class="button secondary" @click="shareText(order, players)">テキスト共有</button><button class="button secondary" @click="shareImage(order, players)">画像共有</button><button v-if="order.confirmed" class="button secondary danger-text" @click="removeSaved(order.id)">削除</button></div>
     </template>
   </section>
 </template>
+
+<style scoped>
+.order-players .invalid-player,.appearance-summary .invalid-player{border:2px solid #b42318;background:#fff0ef;color:#b42318}
+.appearance-summary .invalid-player b{color:#b42318}
+.order-warning{margin:8px 0 0;color:#b42318;font-size:12px}
+</style>
